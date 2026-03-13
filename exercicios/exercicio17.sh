@@ -1,45 +1,38 @@
 #!/bin/bash
 
-# EXERCICIO 17: Descobrir qual servico gera mais logs
-# Objetivo: contar mensagens por servico/processo e listar em ordem decrescente
-# Arquivos de log utilizados: /var/log/syslog, /var/log/messages ou /var/log/auth.log
+# ==============================================================================
+# EXERCÍCIO 17: Qual serviço do sistema está gerando a maior quantidade de logs? 
+# Objetivo: Contar a frequência de mensagens por serviço e as listar em ordem decrescente.
+# ==============================================================================
 
-LOG_FILES=("/var/log/syslog" "/var/log/messages" "/var/log/auth.log")
-LOG_FILE=""
+LOG_ALVO=$(find /var/log -maxdepth 1 -type f \( -name "syslog" -o -name "messages" \) -readable -print -quit)
 
-for file in "${LOG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        LOG_FILE="$file"
-        break
-    fi
-done
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Nenhum log do sistema foi encontrado"
-    exit 1
-fi
+echo "=== 📊 TOP GERADORES DE LOGS DO SISTEMA ==="
+echo "-----------------------------------------------------------------"
 
-echo "=== FREQUENCIA DE MENSAGENS POR SERVICO ==="
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
+awk '{print $5}' "$LOG_ALVO" | \
+    sed -E 's/\[[0-9]+\]:?//; s/:$//' | \
+    grep -Ev '^(kernel|)$' | \
+    sort | uniq -c | sort -nr | head -n 15 | \
+    awk '{ printf "📈 %-6s registros ➔  ⚙️ %s\n", $1, $2 }'
 
-# Comando explicado:
-# awk extrai o nome do processo/servico do campo tipico 'servico[PID]:'
-# sort -rn ordena do maior volume de mensagens para o menor
+echo "-----------------------------------------------------------------"
 
-awk '{
-    servico = $5
-    sub(/\[[0-9]+\]:$/, "", servico)
-    sub(/:$/, "", servico)
-    if (servico != "" && servico != "kernel") {
-        count[servico]++
-    }
-}
-END {
-    for (servico in count) {
-        printf "%7d %s\n", count[servico], servico
-    }
-}' "$LOG_FILE" | sort -rn
-
-echo
-echo "Nota: a primeira linha da saida representa o servico com maior quantidade de logs."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio17.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio17.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio17.sh
+# 4. Injete dados falsos no seu log simulando diferentes volumes de serviço:
+#    sudo bash -c 'for i in {1..10}; do echo "Mar 13 10:00:00 wsl nginx[123]: requisicao web $i" >> /var/log/syslog; done'
+#    sudo bash -c 'for i in {1..25}; do echo "Mar 13 10:05:00 wsl sshd[456]: tentativa de conexao $i" >> /var/log/syslog; done'
+#    sudo bash -c 'for i in {1..5}; do echo "Mar 13 10:10:00 wsl cron[789]: tarefa agendada $i" >> /var/log/syslog; done'
+#    sudo bash -c 'for i in {1..2}; do echo "Mar 13 10:15:00 wsl systemd[1]: status $i" >> /var/log/syslog; done'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio17.sh
+# ==============================================================================

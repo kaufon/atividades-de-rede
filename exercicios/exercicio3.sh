@@ -1,69 +1,47 @@
 #!/bin/bash
 
+# ==============================================================================
 # EXERCÍCIO 3: Rastrear o uso do comando su (switch user)
 # Objetivo: Mostrar o usuário que executou o comando e para qual usuário ele tentou mudar
-# Arquivo de log utilizado: /var/log/auth.log (ou /var/log/secure em sistemas RedHat)
+# ==============================================================================
 
-# Verificar qual arquivo de log existe no sistema
-if [ -f /var/log/auth.log ]; then
-    LOG_FILE="/var/log/auth.log"
-elif [ -f /var/log/secure ]; then
-    LOG_FILE="/var/log/secure"
-else
-    echo "Arquivo de log de autenticação não encontrado"
-    exit 1
-fi
+LOG_ALVO=$(find /var/log -maxdepth 1 -type f \( -name "auth.log" -o -name "secure" \) -readable -print -quit)
 
-echo "=== RASTREAMENTO DE USO DO COMANDO su (SWITCH USER) ==="
-echo
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
 
-# Comando explicado:
-# grep "su\[": busca por linhas que contêm "su[" (processo su)
-# awk: extrai data, hora, usuário que executou (after "by") e o usuário alvo (field que vem após "su")
-# A mensagem típica é: "su[PID]: (to xxxxx) username on none"
+echo "=== RASTREAMENTO DE TROCA DE USUÁRIOS (SU) ==="
 
-grep "su\[" "$LOG_FILE" | \
-    awk '{
-        # Extrai data e hora (MMM DD HH:MM:SS)
-        data = $1 " " $2 " " $3
-        hora = $4
+awk '
+    /su\[[0-9]+\]:/ && /by/ {
+        data_hora = $1 " " $2 " " $3
         
-        # Procura por "by" e extrai o usuário que executou su
-        usuario_origem = ""
-        usuario_destino = ""
-        
-        for (i=1; i<=NF; i++) {
-            if ($i == "by") {
-                usuario_origem = $(i+1)
-                gsub(/[,;]/, "", usuario_origem)
-                break
-            }
+        origem = $0
+        sub(/.* by /, "", origem)
+        sub(/ .*/, "", origem)
+        sub(/\(.*/, "", origem)
+
+        destino = $0
+        sub(/.* for (user )?/, "", destino)
+        sub(/ .*/, "", destino)
+        sub(/\(.*/, "", destino)
+
+        if (origem != "" && destino != "") {
+            printf "📅 Data/Hora: %-16s | 👤 De: %-12s ➔  🎯 Para: %-12s\n", data_hora, origem, destino
         }
-        
-        # Procura por "(to" para extrair o usuário de destino
-        for (i=1; i<=NF; i++) {
-            if ($i ~ /^\(to/) {
-                usuario_destino = substr($i, 5)
-                gsub(/\)/, "", usuario_destino)
-                break
-            }
-        }
-        
-        # Se não encontrou, verifica se está entre aspas ou em outro padrão
-        if (!usuario_destino) {
-            for (i=1; i<=NF; i++) {
-                if ($i ~ /to/) {
-                    usuario_destino = $(i+1)
-                    gsub(/\)/, "", usuario_destino)
-                    gsub(/[,;]/, "", usuario_destino)
-                    break
-                }
-            }
-        }
-        
-        printf "Data/Hora: %-20s | De Usuário: %-15s | Para Usuário: %-15s\n", \
-            data " " hora, usuario_origem, usuario_destino
-    }' | sort
+    }
+' "$LOG_ALVO"
 
-echo
-echo "Nota: Este script mostra todas as tentativas de mudança de usuário com o comando su."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio3.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio3.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio3.sh
+# 4. Injete dados falsos de uso do comando 'su' no seu log para o teste:
+#    sudo bash -c 'echo "Mar 13 09:15:22 wsl su[111]: pam_unix(su:session): session opened for user root(uid=0) by kauan(uid=1000)" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 09:20:05 wsl su[222]: Successful su for admin by root" >> /var/log/auth.log'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio3.sh
+# ==============================================================================

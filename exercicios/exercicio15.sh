@@ -1,53 +1,42 @@
 #!/bin/bash
 
-# EXERCICIO 15: Exibir eventos ocorridos entre 14h e 15h de um dia especifico
-# Objetivo: filtrar um log escolhido para mostrar somente eventos do periodo pedido
-# Arquivo de log padrao: /var/log/syslog (ou /var/log/messages)
+# ==============================================================================
+# EXERCÍCIO 15: Análise de Períodos (Tempo de Atividade)
+# Objetivo: Exibir apenas os eventos que ocorreram entre 14h e 15h de um dia específico
+# ==============================================================================
 
-if [ -z "$1" ]; then
-    echo "Uso: $0 AAAA-MM-DD [arquivo_de_log]"
-    exit 1
-fi
+DATA_ALVO=${1:-$(date +%Y-%m-%d)}
+LOG_ALVO=${2:-$(find /var/log -maxdepth 1 -type f \( -name "syslog" -o -name "messages" \) -readable -print -quit)}
 
-DATA_ALVO="$1"
-LOG_FILE="$2"
+[[ ! -r "$LOG_ALVO" ]] && echo "Erro: Arquivo de log ausente ou sem permissão de leitura." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    if [ -f /var/log/syslog ]; then
-        LOG_FILE="/var/log/syslog"
-    elif [ -f /var/log/messages ]; then
-        LOG_FILE="/var/log/messages"
-    else
-        echo "Nenhum log padrao foi encontrado"
-        exit 1
-    fi
-fi
+PADRAO_DATA=$(date -d "$DATA_ALVO" '+%b[[:space:]]+%-d' 2>/dev/null)
 
-if [ ! -f "$LOG_FILE" ]; then
-    echo "Arquivo de log nao encontrado: $LOG_FILE"
-    exit 1
-fi
+[[ -z "$PADRAO_DATA" ]] && echo "Erro: Data fornecida é inválida. Formato esperado: AAAA-MM-DD." >&2 && exit 1
 
-MES=$(date -d "$DATA_ALVO" '+%b' 2>/dev/null)
-DIA=$(date -d "$DATA_ALVO" '+%-d' 2>/dev/null)
+echo "=== 🕒 EVENTOS REGISTRADOS ENTRE 14:00 E 14:59 ==="
+echo "📅 Data: $DATA_ALVO | 📁 Log: $LOG_ALVO"
+echo "-----------------------------------------------------------------"
 
-if [ -z "$MES" ] || [ -z "$DIA" ]; then
-    echo "Data invalida. Use o formato AAAA-MM-DD"
-    exit 1
-fi
+grep -E "^${PADRAO_DATA}[[:space:]]+14:[0-5][0-9]:[0-5][0-9]" "$LOG_ALVO" | \
+    sed 's/^/🔹 /'
 
-echo "=== EVENTOS ENTRE 14H E 15H ==="
-echo "Data filtrada: $DATA_ALVO"
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
+echo "-----------------------------------------------------------------"
 
-# Comando explicado:
-# awk compara o mes, o dia e a hora do campo HH:MM:SS do syslog
-# o intervalo usado e [14:00:00, 15:00:00), ou seja, inclui 14:59:59
-
-awk -v mes="$MES" -v dia="$DIA" '$1 == mes && ($2 + 0) == (dia + 0) && $3 >= "14:00:00" && $3 < "15:00:00" {
-    print
-}' "$LOG_FILE"
-
-echo
-echo "Nota: se o formato do log for diferente do syslog tradicional, ajuste os campos no awk."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio15.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio15.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio15.sh
+# 4. Injete dados falsos no seu log simulando horários variados (note que 
+#    apenas os eventos que ocorrem entre as 14:00 e 14:59 devem aparecer):
+#    sudo bash -c "echo \"$(date '+%b %e' | sed 's/  / /g') 13:59:59 wsl systemd[1]: Evento ignorado (antes das 14h)\" >> /var/log/syslog"
+#    sudo bash -c "echo \"$(date '+%b %e' | sed 's/  / /g') 14:00:01 wsl systemd[1]: Evento capturado (dentro do horario)\" >> /var/log/syslog"
+#    sudo bash -c "echo \"$(date '+%b %e' | sed 's/  / /g') 14:45:33 wsl kernel: Evento capturado (dentro do horario)\" >> /var/log/syslog"
+#    sudo bash -c "echo \"$(date '+%b %e' | sed 's/  / /g') 15:00:00 wsl crond[99]: Evento ignorado (exatamente as 15h)\" >> /var/log/syslog"
+# 5. Execute o script passando a data de hoje (AAAA-MM-DD):
+#    sudo ./exercicio15.sh "$(date +%Y-%m-%d)"
+# ==============================================================================

@@ -1,48 +1,55 @@
 #!/bin/bash
 
-# EXERCICIO 9: Listar servicos que foram iniciados ou parados recentemente
-# Objetivo: exibir data/hora e nome dos servicos com alteracao de status
-# Arquivos de log utilizados: /var/log/syslog ou /var/log/messages
+# ==============================================================================
+# EXERCÍCIO 9: Status de Serviços
+# Objetivo: Listar a data e o nome dos serviços que tiveram seu status alterado
+# ==============================================================================
 
-LOG_FILES=("/var/log/syslog" "/var/log/messages")
-LOG_FILE=""
+LOG_ALVO=$(find /var/log -maxdepth 1 -type f \( -name "syslog" -o -name "messages" \) -readable -print -quit)
 
-for file in "${LOG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        LOG_FILE="$file"
-        break
-    fi
-done
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Nenhum log de servicos foi encontrado"
-    exit 1
-fi
+echo "=== ⚙️ MONITORAMENTO DE SERVIÇOS (SYSTEMD) ==="
 
-echo "=== SERVICOS INICIADOS OU PARADOS RECENTEMENTE ==="
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
-
-# Comando explicado:
-# grep -Ei: encontra mensagens tipicas do systemd e scripts de servico
-# awk: extrai a data/hora e o nome do servico a partir do texto 'Started/Stopped/Starting/Stopping'
-
-grep -Ei 'systemd\[[0-9]+\]: (Started|Stopped|Starting|Stopping|Restarted|Reloaded)|service.*(started|stopped)' "$LOG_FILE" | \
-    awk '{
+awk '
+    /systemd\[[0-9]+\]: (Started|Stopped|Reloaded|Restarted)/ {
         data_hora = $1 " " $2 " " $3
-        acao = "ALTERADO"
-        servico = "desconhecido"
+        acao = ""
+        servico = ""
 
-        if (match($0, /(Started|Stopped|Starting|Stopping|Restarted|Reloaded) (.*)\./, parts)) {
-            acao = parts[1]
-            servico = parts[2]
-        } else if (match($0, /service ([^ ]+) (started|stopped)/, parts)) {
-            servico = parts[1]
-            acao = parts[2]
+        for (i=1; i<=NF; i++) {
+            if ($i ~ /^(Started|Stopped|Reloaded|Restarted)$/) {
+                acao = $i
+                servico = $(i+1)
+                for (j=i+2; j<=NF; j++) {
+                    servico = servico " " $j
+                }
+                sub(/\.$/, "", servico)
+                break
+            }
         }
+        
+        icone = "🔄"
+        if (acao == "Started") icone = "▶️ "
+        if (acao == "Stopped") icone = "🛑"
+        
+        printf "📅 %-16s | %s %-10s ➔  %s\n", data_hora, icone, acao, servico
+    }
+' "$LOG_ALVO"
 
-        printf "Data/Hora: %-15s | Acao: %-10s | Servico: %s\n", data_hora, acao, servico
-    }'
-
-echo
-echo "Nota: o script procura mensagens de systemd e de servicos registrados no syslog tradicional."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio9.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio9.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio9.sh
+# 4. Injete dados falsos de serviços do systemd no seu log para o teste:
+#    sudo bash -c 'echo "Mar 13 07:15:01 wsl systemd[1]: Started Nginx Web Server." >> /var/log/syslog'
+#    sudo bash -c 'echo "Mar 13 07:20:33 wsl systemd[1]: Stopped MySQL Community Server." >> /var/log/syslog'
+#    sudo bash -c 'echo "Mar 13 07:25:10 wsl systemd[1]: Reloaded OpenBSD Secure Shell server." >> /var/log/syslog'
+#    sudo bash -c 'echo "Mar 13 07:30:05 wsl systemd[1]: Restarted Docker Application Container Engine." >> /var/log/syslog'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio9.sh
+# ==============================================================================

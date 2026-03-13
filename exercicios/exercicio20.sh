@@ -1,38 +1,39 @@
 #!/bin/bash
 
-# EXERCICIO 20: Identificar pacotes atualizados no sistema
-# Objetivo: mostrar o nome do pacote e a data da atualizacao
-# Arquivos de log utilizados: /var/log/dpkg.log, /var/log/dnf.log ou /var/log/yum.log
+# ==============================================================================
+# EXERCÍCIO 20: Atualização de Pacotes
+# Objetivo: Crie um script que identifique e liste todos os pacotes que foram atualizados no sistema.
+# O script deve mostrar o nome do pacote e a data da atualização.
+# ==============================================================================
 
-LOG_FILES=("/var/log/dpkg.log" "/var/log/dnf.log" "/var/log/yum.log")
-LOG_FILE=""
+LOG_ALVO=$(find /var/log -maxdepth 1 -type f \( -name "dpkg.log" -o -name "yum.log" -o -name "dnf.log" \) -readable -print -quit)
 
-for file in "${LOG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        LOG_FILE="$file"
-        break
-    fi
-done
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Nenhum log de gerenciador de pacotes foi encontrado"
-    exit 1
-fi
+echo "=== 🔄 RELATÓRIO DE PACOTES ATUALIZADOS ==="
 
-echo "=== PACOTES ATUALIZADOS NO SISTEMA ==="
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
+awk '
+    $3 == "upgrade" {
+        printf "📅 %-10s às %-8s | 📦 Pacote: %-25s | ⬆️ %s ➔ %s\n", $1, $2, $4, $5, $6
+    }
+    $4 == "Updated:" {
+        pacote = $0; sub(/.*Updated:[ \t]*/, "", pacote)
+        printf "📅 %-6s às %-8s | 📦 Pacote: %s\n", $1 " " $2, $3, pacote
+    }
+' "$LOG_ALVO" | sort -r
 
-if [ "$LOG_FILE" = "/var/log/dpkg.log" ]; then
-    awk '$3 == "upgrade" {
-        printf "Data/Hora: %-19s | Pacote: %-35s | De: %-15s | Para: %s\n", $1 " " $2, $4, $5, $6
-    }' "$LOG_FILE"
-else
-    awk '/Updated:/ {
-        pacote = substr($0, index($0, "Updated:") + 9)
-        printf "Data/Hora: %-19s | Pacote: %s\n", $1 " " $2 " " $3, pacote
-    }' "$LOG_FILE"
-fi
-
-echo
-echo "Nota: no dpkg.log, as versoes antiga e nova aparecem explicitamente na mesma linha."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio20.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio20.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio20.sh
+# 4. Injete dados falsos simulando atualizações no seu log para o teste:
+#    sudo bash -c 'echo "2026-03-13 09:15:00 upgrade bash:amd64 5.0-6ubuntu1 5.0-6ubuntu2" >> /var/log/dpkg.log'
+#    sudo bash -c 'echo "2026-03-13 09:20:33 upgrade curl:amd64 7.68.0-1 7.68.0-2" >> /var/log/dpkg.log'
+#    sudo bash -c 'echo "2026-03-13 09:25:10 upgrade python3:amd64 3.8.2-1 3.8.5-1" >> /var/log/dpkg.log'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio20.sh
+# ==============================================================================

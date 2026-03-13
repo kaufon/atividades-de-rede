@@ -1,102 +1,62 @@
 #!/bin/bash
 
-# EXERCÍCIO 5: Identificar logins rejeitados por outros motivos
-# Objetivo: Encontrar logins rejeitados por:
-#           - Usuários inexistentes
-#           - Falta de permissão
-#           - Outros motivos de rejeição
-# Arquivo de log utilizado: /var/log/auth.log (ou /var/log/secure em sistemas RedHat)
+# ==============================================================================
+# EXERCÍCIO 5: Identificar logins rejeitados por outros motivos 
+# Objetivo: Encontrar logins rejeitados por usuários inexistentes ou falta de permissão 
+# ==============================================================================
 
-# Verificar qual arquivo de log existe no sistema
-if [ -f /var/log/auth.log ]; then
-    LOG_FILE="/var/log/auth.log"
-elif [ -f /var/log/secure ]; then
-    LOG_FILE="/var/log/secure"
-else
-    echo "Arquivo de log de autenticação não encontrado"
-    exit 1
-fi
+LOG_ALVO=$(find /var/log -maxdepth 2 -type f \( -name "auth.log" -o -name "secure" \) -readable -print -quit)
 
-echo "=== RELATÓRIO DE LOGINS REJEITADOS POR OUTROS MOTIVOS ==="
-echo
-echo "Análise de rejeições de login para:"
-echo "  1. Usuários inexistentes"
-echo "  2. Falta de permissão"
-echo "  3. Outros motivos de rejeição"
-echo "====================================================="
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
+
+echo "=== RELATÓRIO DE REJEIÇÕES DE ACESSO ==="
 echo
 
-# Extrair todos os tipos de falhas de login
-# grep: busca por linhas que indicam rejeição de login
-# awk: extrai e categoriza os motivos
-
-grep -E "(Invalid user|User.*not known|Permission denied|Authentication failure)" "$LOG_FILE" | \
-    awk '{
-        # Extrai data e hora (MMM DD HH:MM:SS)
+awk '
+    /(Invalid user|not known|Permission denied|Authentication failure)/ {
         data = $1 " " $2 " " $3
-        hora = $4
+        usuario = "N/A"
         
-        # Determina o tipo de falha
-        tipo_falha = "Outro motivo"
-        usuario = "desconhecido"
-        
-        # Procura pelo nome do usuário
-        for (i=1; i<=NF; i++) {
-            if ($i == "user=" || $i == "User") {
-                if ($i == "user=") {
-                    usuario = $(i+1)
-                    gsub(/[,;]/, "", usuario)
-                } else {
-                    usuario = $(i+1)
-                }
-                break
-            }
+        if (/Invalid user/) {
+            motivo = "Usuário Inexistente"
+            usuario = $NF
+        } else if (/not known/) {
+            motivo = "Usuário Desconhecido"
+            for(i=1;i<=NF;i++) if($i=="User") usuario=$(i+1)
+        } else if (/Permission denied/) {
+            motivo = "Permissão Negada"
+            for(i=1;i<=NF;i++) if($i=="for") usuario=$(i+1)
+        } else if (/Authentication failure/) {
+            motivo = "Falha de Autenticação"
+            for(i=1;i<=NF;i++) if(match($i, /user=.*/)) { split($i, a, "="); usuario=a[2] }
         }
-        
-        # Categoriza o motivo da falha
-        if ($0 ~ /Invalid user/) {
-            tipo_falha = "Usuário inexistente (Invalid user)"
-        } else if ($0 ~ /not known/) {
-            tipo_falha = "Usuário desconhecido (not known)"
-        } else if ($0 ~ /Permission denied/) {
-            tipo_falha = "Permissão negada (Permission denied)"
-        } else if ($0 ~ /Authentication failure/) {
-            tipo_falha = "Falha de autenticação"
-        }
-        
-        printf "Data/Hora: %-20s | Usuário: %-20s | Motivo: %s\n", \
-            data " " hora, usuario, tipo_falha
-    }' | sort
 
-echo
-echo "====================================================="
-echo
-
-# Também gera um sumário por tipo de falha
-echo "SUMÁRIO POR TIPO DE FALHA:"
-echo
-
-grep -E "(Invalid user|User.*not known|Permission denied|Authentication failure)" "$LOG_FILE" | \
-    awk '{
-        if ($0 ~ /Invalid user/) {
-            tipo = "Usuário inexistente"
-        } else if ($0 ~ /not known/) {
-            tipo = "Usuário desconhecido"
-        } else if ($0 ~ /Permission denied/) {
-            tipo = "Permissão negada"
-        } else if ($0 ~ /Authentication failure/) {
-            tipo = "Falha de autenticação"
-        } else {
-            tipo = "Outro motivo"
-        }
+        gsub(/[^a-zA-Z0-9_-]/, "", usuario)
         
-        count[tipo]++
+        printf "📅 %-16s | 👤 Usuário: %-15s | 🛑 %s\n", data, usuario, motivo
+        resumo[motivo]++
     }
     END {
-        for (tipo in count) {
-            printf "%-30s: %d ocorrências\n", tipo, count[tipo]
+        print "\n=== SUMÁRIO ESTATÍSTICO ==="
+        for (m in resumo) {
+            printf "🔸 %-22s: %d\n", m, resumo[m]
         }
-    }' | sort -t: -k2 -rn
+    }
+' "$LOG_ALVO"
 
-echo
-echo "Nota: Este script identifica todos os tipos de rejeição de login diferentes de 'senha incorreta'."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio5.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio5.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio5.sh
+# 4. Injete dados falsos de rejeições diversas no seu log para o teste:
+#    sudo bash -c 'echo "Mar 13 12:00:01 wsl sshd[333]: Invalid user fantasma from 10.0.0.5" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 12:05:10 wsl sshd[334]: User visitante not known" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 12:10:22 wsl sshd[335]: Permission denied for root from 192.168.1.10" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 12:15:40 wsl su[336]: pam_unix(su:auth): authentication failure; logname= uid=1000 euid=0 tty=/dev/pts/0 ruser=kauan rhost=  user=root" >> /var/log/auth.log'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio5.sh
+# ==============================================================================

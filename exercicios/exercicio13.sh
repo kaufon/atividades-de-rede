@@ -1,78 +1,52 @@
 #!/bin/bash
 
-# EXERCICIO 13: Rastrear o uso de apt, apt-get, dnf, yum ou dpkg
-# Objetivo: mostrar quem executou o comando e qual acao foi realizada
-# Arquivos de log utilizados: /var/log/auth.log, /var/log/secure ou /var/log/audit/audit.log
+# ==============================================================================
+# EXERCÍCIO 13: Rastrear comandos de pacotes
+# Objetivo: Mostrar quem executou comandos como apt, dpkg, yum e qual ação foi feita
+# ==============================================================================
 
-LOG_FILES=("/var/log/auth.log" "/var/log/secure" "/var/log/audit/audit.log")
-LOG_FILE=""
+LOG_ALVO=$(find /var/log -maxdepth 3 -type f \( -name "auth.log" -o -name "secure" -o -name "audit.log" \) -readable -print -quit)
 
-for file in "${LOG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        LOG_FILE="$file"
-        break
-    fi
-done
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log não encontrado ou sem permissão." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Nenhum log de auditoria/autenticacao foi encontrado"
-    exit 1
-fi
+echo "=== 📦 AUDITORIA DE GERENCIAMENTO DE PACOTES ==="
 
-echo "=== RASTREAMENTO DE COMANDOS DE GERENCIAMENTO DE PACOTES ==="
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
+awk '
+    /sudo:.*COMMAND=.*(apt|apt-get|dpkg|yum|dnf)/ {
+        data_hora = $1 " " $2 " " $3
+        
+        temp_usr = $0; sub(/.*sudo:[ \t]*/, "", temp_usr); sub(/[ \t:].*/, "", temp_usr)
+        usuario = temp_usr
+        
+        comando = $0; sub(/.*COMMAND=/, "", comando)
+        
+        acao = "Outros"
+        if (comando ~ / (install) /) acao = "Instalação"
+        if (comando ~ / (remove|purge|erase) /) acao = "Remoção"
+        if (comando ~ / (update|upgrade) /) acao = "Atualização"
+        
+        printf "📅 %-16s | 👤 Usuário: %-10s | ⚙️ %-12s | 💻 %s\n", data_hora, usuario, acao, comando
+    }
+    /type=SYSCALL.*exe=".*(apt|apt-get|dpkg|yum|dnf)"/ {
+        temp_auid = $0; sub(/.*auid=/, "", temp_auid); sub(/ .*/, "", temp_auid)
+        temp_exe = $0; sub(/.*exe="/, "", temp_exe); sub(/".*/, "", temp_exe)
+        
+        printf "📅 %-16s | 👤 AUID: %-13s | ⚙️ %-12s | 💻 %s\n", "Log do Auditd", temp_auid, "Execução", temp_exe
+    }
+' "$LOG_ALVO"
 
-if [ "$LOG_FILE" = "/var/log/audit/audit.log" ]; then
-    grep -Ei 'comm="(apt|apt-get|dpkg|yum|dnf)"|exe=".*/(apt|apt-get|dpkg|yum|dnf)"' "$LOG_FILE" | \
-        awk '{
-            data_hora = "auditd"
-            usuario = "desconhecido"
-            acao = "acao nao identificada"
-
-            if (match($0, /auid=([0-9]+)/, auid)) {
-                usuario = auid[1]
-            }
-
-            if (match($0, /comm="([^"]+)"/, cmd)) {
-                acao = cmd[1]
-            }
-
-            printf "Origem: %-19s | Usuario/AUID: %-10s | Comando: %s\n", data_hora, usuario, acao
-        }'
-else
-    grep -E 'sudo: .*COMMAND=.*(apt|apt-get|dpkg|yum|dnf)' "$LOG_FILE" | \
-        awk '{
-            data_hora = $1 " " $2 " " $3
-            usuario = "desconhecido"
-            comando = ""
-            acao = "acao nao identificada"
-
-            for (i = 1; i <= NF; i++) {
-                if ($i == "sudo:") {
-                    usuario = $(i + 1)
-                    gsub(/:/, "", usuario)
-                }
-            }
-
-            if (match($0, /COMMAND=([^;]+)/, cmd)) {
-                comando = cmd[1]
-                if (comando ~ / install( |$)/) {
-                    acao = "install"
-                } else if (comando ~ / remove( |$)| purge( |$)/) {
-                    acao = "remove"
-                } else if (comando ~ / upgrade( |$)| dist-upgrade( |$)/) {
-                    acao = "upgrade"
-                } else if (comando ~ / update( |$)/) {
-                    acao = "update"
-                } else {
-                    acao = "outra acao"
-                }
-            }
-
-            printf "Data/Hora: %-15s | Usuario: %-15s | Acao: %-12s | Comando: %s\n", data_hora, usuario, acao, comando
-        }'
-fi
-
-echo
-echo "Nota: quando o log utilizado e o auditd, o identificador do usuario pode aparecer como AUID numerico."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio13.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio13.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio13.sh
+# 4. Injete dados falsos simulando uso do apt via sudo no seu log para o teste:
+#    sudo bash -c 'echo "Mar 13 14:10:05 wsl sudo:    kauan : TTY=pts/0 ; PWD=/home/kauan ; USER=root ; COMMAND=/usr/bin/apt install nginx" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 14:15:22 wsl sudo:    admin : TTY=pts/1 ; PWD=/tmp ; USER=root ; COMMAND=/usr/bin/apt-get update" >> /var/log/auth.log'
+#    sudo bash -c 'echo "Mar 13 14:20:10 wsl sudo:    root : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/dpkg --purge apache2" >> /var/log/auth.log'
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio13.sh
+# ==============================================================================

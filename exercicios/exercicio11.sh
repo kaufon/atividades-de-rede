@@ -1,64 +1,44 @@
 #!/bin/bash
 
-# EXERCICIO 11: Listar pacotes instalados na ultima semana
-# Objetivo: mostrar a data da instalacao e o nome do pacote
-# Arquivos de log utilizados: /var/log/dpkg.log, /var/log/dnf.log ou /var/log/yum.log
+# ==============================================================================
+# EXERCÍCIO 11: Análise de Pacotes e Segurança Interna
+# Objetivo: Listar pacotes instalados na última semana com a data da instalação [cite: 29]
+# ==============================================================================
 
-LOG_FILES=("/var/log/dpkg.log" "/var/log/dnf.log" "/var/log/yum.log")
-LOG_FILE=""
+LOG_ALVO=$(find /var/log -maxdepth 1 -type f \( -name "dpkg.log" -o -name "yum.log" -o -name "dnf.log" \) -readable -print -quit)
 
-for file in "${LOG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        LOG_FILE="$file"
-        break
-    fi
-done
+[[ -z "$LOG_ALVO" ]] && echo "Erro: Arquivo de log de pacotes ausente ou sem permissão." >&2 && exit 1
 
-if [ -z "$LOG_FILE" ]; then
-    echo "Nenhum log de gerenciador de pacotes foi encontrado"
-    exit 1
-fi
+echo "=== 📦 PACOTES INSTALADOS NOS ÚLTIMOS 7 DIAS ==="
 
-echo "=== PACOTES INSTALADOS NA ULTIMA SEMANA ==="
-echo "Arquivo de log utilizado: $LOG_FILE"
-echo
+REGEX_DPKG=$(for i in {0..7}; do date -d "$i days ago" '+%Y-%m-%d'; done | paste -sd '|')
+REGEX_YUM=$(for i in {0..7}; do date -d "$i days ago" '+%b %e' | sed 's/  / /g'; done | paste -sd '|')
 
-if [ "$LOG_FILE" = "/var/log/dpkg.log" ]; then
-    DATA_LIMITE=$(date -d '7 days ago' +%F)
-
-    # Comando explicado:
-    # awk: no dpkg.log a data ja vem em formato YYYY-MM-DD, o que permite comparacao direta
-    # $3 == "install": mantem apenas operacoes de instalacao
-
-    awk -v limite="$DATA_LIMITE" '$1 >= limite && $3 == "install" {
-        printf "Data/Hora: %-19s | Pacote: %-35s | Versao: %s\n", $1 " " $2, $4, $5
-    }' "$LOG_FILE"
+if [[ "$LOG_ALVO" == *dpkg.log ]]; then
+    grep -E "($REGEX_DPKG)" "$LOG_ALVO" | awk '/ install / {
+        printf "📅 %-10s às %-8s | 📦 Pacote: %-25s | 🏷️ Versão: %s\n", $1, $2, $4, $5
+    }'
 else
-    AGORA=$(date +%s)
-
-    # Comando explicado:
-    # logs yum/dnf usam mes por extenso, entao convertemos a data para epoch com mktime
-    # e filtramos apenas eventos mais novos que 7 dias
-
-    awk -v agora="$AGORA" '
-        BEGIN {
-            meses["Jan"] = 1; meses["Feb"] = 2; meses["Mar"] = 3; meses["Apr"] = 4;
-            meses["May"] = 5; meses["Jun"] = 6; meses["Jul"] = 7; meses["Aug"] = 8;
-            meses["Sep"] = 9; meses["Oct"] = 10; meses["Nov"] = 11; meses["Dec"] = 12;
-            ano = strftime("%Y", agora)
-            limite = agora - 604800
-        }
-        /Installed:/ {
-            tempo = $3
-            gsub(/:/, " ", tempo)
-            evento = mktime(ano " " meses[$1] " " $2 " " tempo)
-            if (evento >= limite) {
-                pacote = substr($0, index($0, "Installed:") + 11)
-                printf "Data/Hora: %-19s | Pacote: %s\n", $1 " " $2 " " $3, pacote
-            }
-        }
-    ' "$LOG_FILE"
+    grep -E "($REGEX_YUM)" "$LOG_ALVO" | awk '/Installed:/ {
+        pacote = $0; sub(/.*Installed:[ \t]*/, "", pacote)
+        printf "📅 %-6s às %-8s | 📦 Pacote: %s\n", $1 " " $2, $3, pacote
+    }'
 fi
 
-echo
-echo "Nota: em sistemas RPM, o ano atual e usado para converter a data do log em epoch."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio11.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio11.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio11.sh
+# 4. Injete dados falsos simulando instalações no seu log (usamos comandos 
+#    dinâmicos para gerar datas reais dos últimos 7 dias para o teste funcionar):
+#    sudo bash -c "echo \"$(date '+%Y-%m-%d') 10:15:30 startup archives unpack\" >> /var/log/dpkg.log"
+#    sudo bash -c "echo \"$(date '+%Y-%m-%d') 10:15:31 install htop:amd64 <none> 3.0.5-7\" >> /var/log/dpkg.log"
+#    sudo bash -c "echo \"$(date -d '3 days ago' '+%Y-%m-%d') 14:22:10 install nginx:amd64 <none> 1.18.0-2\" >> /var/log/dpkg.log"
+#    sudo bash -c "echo \"$(date -d '10 days ago' '+%Y-%m-%d') 09:00:00 install pacote-antigo:amd64 <none> 1.0.0\" >> /var/log/dpkg.log"
+# 5. Execute o script com privilégios de administrador:
+#    sudo ./exercicio11.sh
+# ==============================================================================

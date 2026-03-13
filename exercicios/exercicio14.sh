@@ -1,74 +1,67 @@
 #!/bin/bash
 
-# EXERCICIO 14: Calcular o tempo de atividade entre um boot e o desligamento seguinte
-# Objetivo: analisar o ultimo ciclo completo de boot -> shutdown encontrado em /var/log/wtmp
-# Arquivo de log utilizado: /var/log/wtmp
+# ==============================================================================
+# EXERCÍCIO 14: Análise de Períodos (Tempo de Atividade)
+# Objetivo: Analisar a diferença de tempo entre o último boot e desligamento
+# ==============================================================================
 
-WTMP_FILE="/var/log/wtmp"
+LOG_WTMP="/var/log/wtmp"
 
-if [ ! -f "$WTMP_FILE" ]; then
-    echo "Arquivo de log $WTMP_FILE nao encontrado"
-    exit 1
-fi
+[[ ! -r "$LOG_WTMP" ]] && echo "Erro: Arquivo binário de log ausente ou sem permissão." >&2 && exit 1
 
-if ! command -v last >/dev/null 2>&1; then
-    echo "Comando 'last' nao encontrado no sistema"
-    exit 1
-fi
+echo "=== ⏱️ TEMPO DE ATIVIDADE DO SISTEMA (UPTIME) ==="
 
-echo "=== TEMPO DE ATIVIDADE DO SISTEMA ==="
-echo "Arquivo de log utilizado: $WTMP_FILE"
-echo
-
-# Comando explicado:
-# last -xF: mostra eventos especiais com data/hora completa
-# awk: encontra primeiro shutdown e o reboot imediatamente anterior a ele,
-#      formando o ciclo completo mais recente
-
-PAR_EVENTOS=$(last -xF -f "$WTMP_FILE" | awk '
-    /shutdown/ && !shutdown_encontrado {
-        shutdown = $5 " " $6 " " $7 " " $8 " " $9
-        shutdown_encontrado = 1
+last -xF -f "$LOG_WTMP" | awk '
+    BEGIN {
+        meses["Jan"]="01"; meses["Feb"]="02"; meses["Mar"]="03"; meses["Apr"]="04";
+        meses["May"]="05"; meses["Jun"]="06"; meses["Jul"]="07"; meses["Aug"]="08";
+        meses["Sep"]="09"; meses["Oct"]="10"; meses["Nov"]="11"; meses["Dec"]="12";
+    }
+    /^shutdown/ && !fim {
+        split($8, t, ":")
+        fim = mktime($9 " " meses[$6] " " $7 " " t[1] " " t[2] " " t[3])
+        fim_str = $5 ", " $7 " de " $6 " de " $9 " às " $8
         next
     }
-    shutdown_encontrado && /reboot/ {
-        reboot = $5 " " $6 " " $7 " " $8 " " $9
-        print reboot "|" shutdown
+    /^reboot/ && fim {
+        split($8, t, ":")
+        inicio = mktime($9 " " meses[$6] " " $7 " " t[1] " " t[2] " " t[3])
+        inicio_str = $5 ", " $7 " de " $6 " de " $9 " às " $8
+        
+        diferenca = fim - inicio
+        if (diferenca > 0) {
+            dias = int(diferenca / 86400)
+            horas = int((diferenca % 86400) / 3600)
+            minutos = int((diferenca % 3600) / 60)
+            segundos = diferenca % 60
+            
+            printf "🟢 Inicialização: %s\n", inicio_str
+            printf "🔴 Desligamento : %s\n", fim_str
+            printf "⏳ Tempo Ligado : %d dias, %d horas, %d minutos e %d segundos\n", dias, horas, minutos, segundos
+        } else {
+            print "⚠️ Aviso: Os eventos no log parecem estar inconsistentes."
+        }
         exit
     }
-')
+    END {
+        if (!fim || !inicio) print "⚠️ Nenhum ciclo completo de boot/shutdown encontrado no log."
+    }
+'
 
-if [ -z "$PAR_EVENTOS" ]; then
-    echo "Nao foi encontrado um ciclo completo de boot e shutdown no log"
-    exit 1
-fi
-
-BOOT_TIME=${PAR_EVENTOS%%|*}
-SHUTDOWN_TIME=${PAR_EVENTOS#*|}
-
-BOOT_EPOCH=$(date -d "$BOOT_TIME" +%s 2>/dev/null)
-SHUTDOWN_EPOCH=$(date -d "$SHUTDOWN_TIME" +%s 2>/dev/null)
-
-if [ -z "$BOOT_EPOCH" ] || [ -z "$SHUTDOWN_EPOCH" ]; then
-    echo "Nao foi possivel converter as datas encontradas no log"
-    exit 1
-fi
-
-DIFERENCA=$((SHUTDOWN_EPOCH - BOOT_EPOCH))
-
-if [ "$DIFERENCA" -lt 0 ]; then
-    echo "Os eventos encontrados estao fora de ordem ou o log esta inconsistente"
-    exit 1
-fi
-
-DIAS=$((DIFERENCA / 86400))
-HORAS=$(((DIFERENCA % 86400) / 3600))
-MINUTOS=$(((DIFERENCA % 3600) / 60))
-SEGUNDOS=$((DIFERENCA % 60))
-
-echo "Boot:      $BOOT_TIME"
-echo "Shutdown:  $SHUTDOWN_TIME"
-printf 'Uptime:    %d dia(s), %d hora(s), %d minuto(s) e %d segundo(s)\n' "$DIAS" "$HORAS" "$MINUTOS" "$SEGUNDOS"
-
-echo
-echo "Nota: o calculo usa o ultimo ciclo completo; se o sistema ainda estiver ativo, o boot atual nao entra nesta conta."
+# ==============================================================================
+# TUTORIAL DE COMO TESTAR:
+# 
+# 1. Salve este código em um arquivo chamado: exercicio14.sh
+# 2. Remova possíveis quebras de linha invisíveis do Windows (CRLF para LF):
+#    sed -i 's/\r$//' exercicio14.sh
+# 3. Torne o arquivo executável rodando no terminal: 
+#    chmod +x exercicio14.sh
+# 4. Execute o script diretamente:
+#    ./exercicio14.sh
+#
+# NOTA PARA USUÁRIOS DE WSL: Como vimos nos exercícios 6 e 7, o WSL não 
+# registra ciclos reais de boot e shutdown de kernel no log binário wtmp. 
+# Portanto, ao testar no WSL, a mensagem "Nenhum ciclo completo" é o 
+# comportamento correto e esperado. O cálculo funcionará perfeitamente 
+# em uma máquina Linux real ou VM tradicional.
+# ==============================================================================
